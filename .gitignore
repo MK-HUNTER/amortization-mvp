@@ -1,0 +1,11 @@
+# Ignore the local SQLite database file
+*.db
+loan_manager.db
+
+# Ignore Python runtime caches
+__pycache__/
+*.pyc
+
+# Ignore OS files
+.DS_Store
+Thumbs.db

@@ -1,33 +1,46 @@
 import pandas as pd
-import streamlit as st
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
-@st.cache_data
-def generate_amortization_schedule(principal, annual_rate, years):
-    periods = int(years * 4)
-    monthly_rate = annual_rate / 4
+def calculate_amortization_schedule(loan_id, principal, annual_rate, term_years, start_date):
+    """Generates a full monthly schedule and high-level KPIs based on term in years."""
+    term_months = int(term_years * 12)
+    monthly_rate = (annual_rate / 100) / 12
     
     if monthly_rate > 0:
-        pmt = principal * (monthly_rate * (1 + monthly_rate)**periods) / ((1 + monthly_rate)**periods - 1)
+        monthly_payment = (principal * monthly_rate) / (1 - (1 + monthly_rate)**(-term_months))
     else:
-        pmt = principal / periods
-
-    schedule = []
-    remaining_balance = principal
-
-    for i in range(1, periods + 1):
-        interest_payment = remaining_balance * monthly_rate
-        principal_payment = pmt - interest_payment
-        opening_balance = remaining_balance
-        remaining_balance -= principal_payment
+        monthly_payment = principal / term_months
+    
+    rows = []
+    current_balance = principal
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    
+    for i in range(1, term_months + 1):
+        interest_payment = current_balance * monthly_rate
+        principal_payment = monthly_payment - interest_payment
         
-        if i == periods: remaining_balance = 0
-
-        schedule.append({
-            "Period": i,
-            "Opening Balance": round(opening_balance, 2),
-            "Total Payment": round(pmt, 2),
-            "Interest Component": round(interest_payment, 2),
-            "Principal Component": round(principal_payment, 2),
-            "Closing Balance": round(max(0, remaining_balance), 2)
+        if i == term_months:
+            principal_payment = current_balance
+            monthly_payment = principal_payment + interest_payment
+            
+        opening_balance = current_balance
+        current_balance -= principal_payment
+        payment_date = start_dt + relativedelta(months=i-1)
+        
+        rows.append({
+            "loan_id": loan_id,
+            "month_index": i,
+            "date": payment_date.strftime('%Y-%m-%d'),
+            "opening_bal": round(opening_balance, 2),
+            "payment": round(monthly_payment, 2),
+            "principal_paid": round(principal_payment, 2),
+            "interest_paid": round(interest_payment, 2),
+            "closing_bal": round(max(0, current_balance), 2)
         })
-    return pd.DataFrame(schedule)
+        
+    df_schedule = pd.DataFrame(rows)
+    total_paid = df_schedule['payment'].sum()
+    total_interest = total_paid - principal
+    
+    return df_schedule, round(total_paid, 2), round(total_interest, 2)
