@@ -7,18 +7,40 @@ def get_connection():
     return sqlite3.connect(DB_NAME, check_same_thread=False)
 
 def init_db():
-    with get_connection() as conn:
-        # Detail Table
-        conn.execute('''CREATE TABLE IF NOT EXISTS tbl_amortization_detail 
-                     (loan_id TEXT PRIMARY KEY, loan_name TEXT, principal REAL, 
-                      rate REAL, term_months INTEGER, start_date TEXT, 
-                      total_interest REAL, total_paid REAL)''')
-        # Calculation Table
-        conn.execute('''CREATE TABLE IF NOT EXISTS tbl_amortization_calc
-                     (loan_id TEXT, month_index INTEGER, date TEXT, 
-                      opening_bal REAL, payment REAL, principal_paid REAL, 
-                      interest_paid REAL, closing_bal REAL,
-                      FOREIGN KEY(loan_id) REFERENCES tbl_amortization_detail(loan_id))''')
+    conn = sqlite3.connect("loan_manager.db")
+    cursor = conn.cursor()
+    
+    # Update/Check your structural details table schema
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tbl_amortization_detail (
+            loan_id TEXT PRIMARY KEY,
+            loan_name TEXT,
+            principal REAL,
+            rate REAL,
+            term_months INTEGER,
+            balloon_years REAL DEFAULT 0.0,  -- ENSURE THIS LINE IS ADDED
+            start_date TEXT,
+            total_interest REAL,
+            total_paid REAL
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tbl_amortization_calc (
+            loan_id TEXT,
+            month_index INTEGER,
+            date TEXT,
+            opening_bal REAL,
+            payment REAL,
+            principal_paid REAL,
+            interest_paid REAL,
+            closing_bal REAL,
+            override_closing_bal REAL DEFAULT 0.0,
+            FOREIGN KEY(loan_id) REFERENCES tbl_amortization_detail(loan_id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
 def save_loan(loan_detail, schedule_df):
     with get_connection() as conn:
@@ -44,3 +66,5 @@ def reset_db():
         conn.execute("DROP TABLE IF EXISTS tbl_amortization_calc")
         conn.execute("DROP TABLE IF EXISTS tbl_amortization_detail")
     init_db()
+
+    # Inside database.py (Ensure your table setup query looks like this)

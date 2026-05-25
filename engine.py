@@ -2,45 +2,77 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-def calculate_amortization_schedule(loan_id, principal, annual_rate, term_years, start_date):
-    """Generates a full monthly schedule and high-level KPIs based on term in years."""
-    term_months = int(term_years * 12)
-    monthly_rate = (annual_rate / 100) / 12
+def calculate_amortization_schedule(loan_id, principal, annual_rate, term_years, start_date_str, balloon_years=0.0):
+    """
+    Computes a standard amortization schedule where the monthly payment stays fixed.
+    At the balloon cutoff month, the payment absorbs the entire remaining balance + interest.
+    """
+    monthly_rate = (annual_rate / 100.0) / 12.0
+    total_months = int(term_years * 12)
+    balloon_cutoff_month = int(balloon_years * 12) if balloon_years > 0 else 0
     
+    # Calculate the strict FIXED monthly payment based on the base term
     if monthly_rate > 0:
-        monthly_payment = (principal * monthly_rate) / (1 - (1 + monthly_rate)**(-term_months))
+        fixed_payment = (principal * monthly_rate) / (1 - (1 + monthly_rate) ** (-total_months))
     else:
-        monthly_payment = principal / term_months
-    
-    rows = []
+        fixed_payment = principal / total_months
+        
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    records = []
     current_balance = principal
-    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    cumulative_interest = 0.0
+    cumulative_paid = 0.0
     
-    for i in range(1, term_months + 1):
-        interest_payment = current_balance * monthly_rate
-        principal_payment = monthly_payment - interest_payment
+    for i in range(1, total_months + 1):
+        opening_bal = current_balance
+        interest_paid = round(opening_bal * monthly_rate, 2)
         
-        if i == term_months:
-            principal_payment = current_balance
-            monthly_payment = principal_payment + interest_payment
+        # Determine payment and principal using strict fixed rules
+        if balloon_cutoff_month > 0 and i == balloon_cutoff_month:
+            # Excel Logic: Payment = Current Interest + Previous Month Closing Bal (opening_bal)
+            principal_paid = round(opening_bal, 2)
+            payment = round(interest_paid + opening_bal, 2)
+            closing_bal = 0.0
+        else:
+            payment = round(fixed_payment, 2)
+            principal_paid = round(payment - interest_paid, 2)
             
-        opening_balance = current_balance
-        current_balance -= principal_payment
-        payment_date = start_dt + relativedelta(months=i-1)
+            # Handle natural loan payoff end anomalies
+            if i == total_months or (opening_bal - principal_paid) < 0:
+                principal_paid = round(opening_bal, 2)
+                payment = round(principal_paid + interest_paid, 2)
+                closing_bal = 0.0
+            else:
+                closing_bal = round(opening_bal - principal_paid, 2)
+                
+        current_date_str = (start_date + relativedelta(months=i-1)).strftime('%Y-%m-%d')
         
-        rows.append({
+        records.append({
             "loan_id": loan_id,
             "month_index": i,
-            "date": payment_date.strftime('%Y-%m-%d'),
-            "opening_bal": round(opening_balance, 2),
-            "payment": round(monthly_payment, 2),
-            "principal_paid": round(principal_payment, 2),
-            "interest_paid": round(interest_payment, 2),
-            "closing_bal": round(max(0, current_balance), 2)
+            "date": current_date_str,
+            "opening_bal": opening_bal,
+            "payment": payment,
+            "principal_paid": principal_paid,
+            "interest_paid": interest_paid,
+            "closing_bal": closing_bal,
+            "override_closing_bal": 0.0
         })
         
-    df_schedule = pd.DataFrame(rows)
-    total_paid = df_schedule['payment'].sum()
-    total_interest = total_paid - principal
-    
-    return df_schedule, round(total_paid, 2), round(total_interest, 2)
+        cumulative_interest += interest_paid
+        cumulative_paid += payment
+        current_balance = closing_bal
+        
+        # For rows past the balloon or natural payoff, zero them out completely
+        if current_balance <= 0:
+            for j in range(i + 1, total_months + 1):
+                next_date = (start_date + relativedelta(months=j-1)).strftime('%Y-%m-%d')
+                records.append({
+                    "loan_id": loan_id, "month_index": j, "date": next_date,
+                    "opening_bal": 0.0, "payment": 0.0, "principal_paid": 0.0,
+                    "interest_paid": 0.0, "closing_bal": 0.0, "override_closing_bal": 0.0
+                })
+            break
+            
+    df = pd.DataFrame(records)
+    return df, round(cumulative_paid, 2), round(cumulative_interest, 2)
