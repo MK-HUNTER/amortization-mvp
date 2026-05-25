@@ -9,15 +9,15 @@ init_db()
 
 # --- STEP 1: INITIALIZE DEFAULT VALUES IN STATE ---
 if "form_loan_id" not in st.session_state:
-    st.session_state.form_loan_id = ""
+    st.session_state.form_loan_id = "1001"
 if "form_loan_name" not in st.session_state:
-    st.session_state.form_loan_name = ""
+    st.session_state.form_loan_name = "Test"
 if "form_principal" not in st.session_state:
-    st.session_state.form_principal = 00.0
+    st.session_state.form_principal = 100000.0
 if "form_rate" not in st.session_state:
-    st.session_state.form_rate = 0.0
+    st.session_state.form_rate = 10.0
 if "form_term_years" not in st.session_state:
-    st.session_state.form_term_years = 00.0 
+    st.session_state.form_term_years = 20.0 
 
 # --- STEP 2: STAGE DATA AND SAFELY CLEAR FIELDS ---
 def clear_and_stage_form_fields():
@@ -177,7 +177,7 @@ with tab1:
                 except Exception as e:
                     st.error(f"Error reading file structure: {str(e)}")
 
-# --- TAB 2: LOAN INSPECTOR (UPDATED FOR INTEGRATED CHART & TABLE AGGREGATION) ---
+# --- TAB 2: LOAN INSPECTOR (UPDATED WITH QUARTERLY VIEW FILTER) ---
 with tab2:
     loans = get_all_loans()
     if not loans.empty:
@@ -198,41 +198,56 @@ with tab2:
         st.divider()
         
         # Display Controls Toggle
-        chart_top_1, chart_top_2 = st.columns([3, 1])
+        chart_top_1, chart_top_2 = st.columns([2, 2])
         with chart_top_1:
             st.subheader("Payment Composition Breakdown")
         with chart_top_2:
             timeline_view = st.radio(
                 "Timeline Display Granularity",
-                ["Monthly view", "Yearly view"],
+                ["Monthly view", "Quarterly view", "Yearly view"],
                 horizontal=True,
                 label_visibility="collapsed"
             )
 
-        # Dynamic Content Generation Block based on Granularity Toggle
-        if timeline_view == "Yearly view" and not full_sched.empty:
-            full_sched['Year'] = pd.to_datetime(full_sched['date']).dt.strftime('%Y')
+        # Dynamic Content Routing Based on Toggle State
+        if not full_sched.empty:
+            # Convert date column to pandas datetime object for reliable time period extraction
+            datetime_series = pd.to_datetime(full_sched['date'])
             
-            # Aggregate calculations to build unique structural yearly logs
-            yearly_grouped = full_sched.groupby('Year').agg({
-                'opening_bal': 'first',         # Bal at the start of that year
-                'payment': 'sum',               # Sum payments inside that year
-                'principal_paid': 'sum',        # Sum principal payments inside that year
-                'interest_paid': 'sum',         # Sum interest payments inside that year
-                'closing_bal': 'last'           # Ending balance at the close of that year
-            }).reset_index()
-            
-            # Render chart and clean total tables matching the same yearly logic
-            st.bar_chart(yearly_grouped, x="Year", y=["principal_paid", "interest_paid"], use_container_width=True)
-            
-            st.subheader("Yearly Schedule Summary Reference")
-            st.dataframe(yearly_grouped, use_container_width=True, hide_index=True)
-        else:
-            # Default Monthly presentation paths
-            st.bar_chart(full_sched, x="date", y=["principal_paid", "interest_paid"], use_container_width=True)
-            
-            st.subheader("Full Monthly Schedule Log")
-            st.dataframe(full_sched, use_container_width=True, hide_index=True)
+            if timeline_view == "Yearly view":
+                full_sched['Year'] = datetime_series.dt.strftime('%Y')
+                yearly_grouped = full_sched.groupby('Year').agg({
+                    'opening_bal': 'first',
+                    'payment': 'sum',
+                    'principal_paid': 'sum',
+                    'interest_paid': 'sum',
+                    'closing_bal': 'last'
+                }).reset_index()
+                
+                st.bar_chart(yearly_grouped, x="Year", y=["principal_paid", "interest_paid"], use_container_width=True)
+                st.subheader("Yearly Schedule Summary Reference")
+                st.dataframe(yearly_grouped, use_container_width=True, hide_index=True)
+                
+            elif timeline_view == "Quarterly view":
+                # Extracts year combined with quarter index (e.g., '2026-Q1')
+                full_sched['Quarter'] = datetime_series.dt.to_period('Q').astype(str)
+                quarterly_grouped = full_sched.groupby('Quarter').agg({
+                    'opening_bal': 'first',         # Value at start of quarter
+                    'payment': 'sum',               # Total aggregated quarter payments
+                    'principal_paid': 'sum',        # Total principal paid during quarter
+                    'interest_paid': 'sum',         # Total interest paid during quarter
+                    'closing_bal': 'last'           # Value at end of quarter
+                }).reset_index()
+                
+                st.bar_chart(quarterly_grouped, x="Quarter", y=["principal_paid", "interest_paid"], use_container_width=True)
+                st.subheader("Quarterly Schedule Summary Reference")
+                st.dataframe(quarterly_grouped, use_container_width=True, hide_index=True)
+                
+            else:
+                # Default Monthly Presentation
+                st.bar_chart(full_sched, x="date", y=["principal_paid", "interest_paid"], use_container_width=True)
+                st.subheader("Full Monthly Schedule Log")
+                st.dataframe(full_sched, use_container_width=True, hide_index=True)
     else:
         st.info("No loans found. Add one in the Data Entry tab.")
 
